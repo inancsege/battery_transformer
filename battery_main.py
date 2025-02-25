@@ -74,7 +74,6 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
         gpu_data = list(map(float, result.stdout.strip().split(", ")[1:]))
         gpu_data[0] = gpu_data[0] - avg_power
-        gpu_data[3] = gpu_data[3] - avg_gpu_util
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         cpu_usage = psutil.cpu_percent() - avg_cpu_util
         
