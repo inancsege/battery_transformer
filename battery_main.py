@@ -124,6 +124,8 @@ test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
 
 # MODELS - TRAINING ======================================================================================
 
+
+
 model = SOHTEC(input_dim=NUM_FEATURES, embed_dim=256).to(device)
 
 criterion = nn.MSELoss()
