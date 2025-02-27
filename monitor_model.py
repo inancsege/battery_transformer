@@ -91,7 +91,7 @@ def load_test_data():
 
 test_loader = load_test_data()
 
-from utils import SOHTEC
+from utils_TRANSFORMER import SOHTEC
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
