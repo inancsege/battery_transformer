@@ -202,7 +202,7 @@ def evaluate_model(model, test_loader):
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
 
-    with open('error_results_TRANSFORMER.txt', "w") as f:
+    with open('outputs/error_results_TRANSFORMER.txt', "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\nTest MAE: {mae:.4f}\nTest R²: {r2:.4f}")
 
 time.sleep(2)
