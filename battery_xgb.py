@@ -146,7 +146,7 @@ def evaluate_model(model, X_test, y_test):
 time.sleep(2)
 
 monitoring = True
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_XGB.csv', 0.01), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_XGB.csv', 0.001), daemon=True)
 monitor_thread.start()
 
 start_time = time.time()
