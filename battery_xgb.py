@@ -1,11 +1,9 @@
 import pandas as pd
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
+import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 from utils_CNN import truncated_normal_, CNNModel, SOHDataset, create_sequences
 
@@ -84,8 +82,6 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
 # DATA PREPROC ===========================================================================================
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 df = pd.read_csv("data/battery/scaledData1_with_soh.csv")
 
 features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
@@ -97,118 +93,64 @@ scaler_data = StandardScaler()
 X = scaler_data.fit_transform(X)
 y = y / 100
 
-SEQ_LEN = 100
-NUM_FEATURES = len(features)
-
-X_seq, y_seq = create_sequences(X, y, SEQ_LEN)
-
-train_size = int(0.8 * len(X_seq))
-val_size = int(0.1 * len(X_seq))
-test_size = len(X_seq) - train_size - val_size
-
-X_train, y_train = X_seq[:train_size], y_seq[:train_size]
-X_val, y_val = X_seq[train_size:train_size+val_size], y_seq[train_size:train_size+val_size]
-X_test, y_test = X_seq[train_size+val_size:], y_seq[train_size+val_size:]
-
-train_dataset = SOHDataset(X_train, y_train)
-val_dataset = SOHDataset(X_val, y_val)
-test_dataset = SOHDataset(X_test, y_test)
-
-BATCH_SIZE = 32
-
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
+X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.15, random_state=42)
 
 # MODELS - TRAINING ======================================================================================
 
-model = CNNModel(input_dim=NUM_FEATURES, embed_dim=256).to(device)
+xgb_model = xgb.XGBRegressor(
+    objective='reg:squarederror', 
+    n_estimators=500, 
+    learning_rate=0.05, 
+    max_depth=6, 
+    subsample=0.8, 
+    colsample_bytree=0.8, 
+    tree_method='gpu_hist',
+    eval_metric='rmse',
+    early_stopping_rounds=50,
+    random_state=42
+)
 
-criterion = nn.MSELoss()
-optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-4)
-
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=20):
-    best_val_loss = float("inf")
-
-    for epoch in range(num_epochs):
-        model.train()
-        train_loss = 0.0
-
-        for batch_X, batch_y in train_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(batch_X).squeeze()
-
-            loss = criterion(outputs, batch_y)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for batch_X, batch_y in val_loader:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                outputs = model(batch_X).squeeze()
-                val_loss += criterion(outputs, batch_y).item()
-
-        train_loss /= len(train_loader)
-        val_loss /= len(val_loader)
-
-        print(f"Epoch {epoch+1}/{num_epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), "models/best_cnn_model.pth")
-
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_CNN.csv', 1), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_XGB.csv', 1), daemon=True)
 monitor_thread.start()
 
 # Train the model
-train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=20)
+xgb_model.fit(
+    X_train, y_train,
+    eval_set=[(X_val, y_val)],
+    verbose=True
+)
 
 monitoring = False
 
+xgb_model.save_model("models/best_xgb_model.json")
+
+#loaded_model = xgb.XGBRegressor()
+#loaded_model.load_model("xgboost_model.json")
+
 # MODELS - TESTING =======================================================================================
 
-def evaluate_model(model, test_loader):
-    model.load_state_dict(torch.load("models/best_cnn_model.pth"))
-    model.eval()
-
-    all_preds, all_targets = [], []
-    with torch.no_grad():
-        for batch_X, batch_y in test_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            outputs = model(batch_X).squeeze()
-
-            all_preds.append(outputs.cpu().numpy())
-            all_targets.append(batch_y.cpu().numpy())
-
-    all_preds = np.concatenate(all_preds)
-    all_targets = np.concatenate(all_targets)
-
-    rmse = np.sqrt(mean_squared_error(all_targets, all_preds))
-    mae = mean_absolute_error(all_targets, all_preds)
-    r2 = r2_score(all_targets, all_preds)
-
+def evaluate_model(model, X_test, y_test):
+    predictions = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
+    mae = mean_absolute_error(y_test, predictions)
+    r2 = r2_score(y_test, predictions)
+    
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
 
-    with open('outputs/error_results_CNN.txt', "w") as f:
+    with open('outputs/error_results_XGB.txt', "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\nTest MAE: {mae:.4f}\nTest R²: {r2:.4f}")
 
 time.sleep(2)
 
 monitoring = True
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_CNN.csv', 0.01), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_XGB.csv', 0.01), daemon=True)
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(model, test_loader)
+evaluate_model(xgb_model, X_test, y_test)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False

@@ -17,35 +17,51 @@ def truncated_normal_(tensor, mean=0.0, std=0.2, a=-2.0, b=2.0):
     return tensor
 
 # ------------------------------
-# CNN-Based Feature Extraction
+# TCN-Based Feature Extraction
 # ------------------------------
-class CNNFeatureExtractor(nn.Module):
-    def __init__(self, input_dim, embed_dim=256, kernel_sizes=[4, 3], strides=[2, 2]):
-        super(CNNFeatureExtractor, self).__init__()
-        
-        self.conv1 = nn.Conv1d(input_dim, embed_dim, kernel_sizes[0], stride=strides[0])
-        self.bn1 = nn.BatchNorm1d(embed_dim)
+class TCNBlock(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size=3, dilation=1):
+        super(TCNBlock, self).__init__()
+        self.conv1 = nn.Conv1d(input_dim, output_dim, kernel_size, padding=(kernel_size-1)*dilation, dilation=dilation)
+        self.bn1 = nn.BatchNorm1d(output_dim)
         self.relu = nn.ReLU()
-        
-        self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_sizes[1], stride=strides[1])
-        self.bn2 = nn.BatchNorm1d(embed_dim)
-        
+        self.conv2 = nn.Conv1d(output_dim, output_dim, kernel_size, padding=(kernel_size-1)*dilation, dilation=dilation)
+        self.bn2 = nn.BatchNorm1d(output_dim)
+        self.residual = nn.Conv1d(input_dim, output_dim, 1) if input_dim != output_dim else nn.Identity()
+    
     def forward(self, x):
-        """
-        x: (batch_size, channels, time_steps)
-        """
+        residual = self.residual(x)
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
-        x = torch.mean(x, dim=-1)  # Global average pooling
+        
+        # Ensure the same sequence length for residual and output
+        min_length = min(x.shape[2], residual.shape[2])
+        x = x[:, :, :min_length]
+        residual = residual[:, :, :min_length]
+        
+        return x + residual
+
+class TCNFeatureExtractor(nn.Module):
+    def __init__(self, input_dim, embed_dim=256, kernel_size=3, num_layers=3):
+        super(TCNFeatureExtractor, self).__init__()
+        layers = []
+        for i in range(num_layers):
+            layers.append(TCNBlock(input_dim if i == 0 else embed_dim, embed_dim, kernel_size, dilation=2**i))
+        self.tcn = nn.Sequential(*layers)
+        self.global_pooling = nn.AdaptiveAvgPool1d(1)
+    
+    def forward(self, x):
+        x = self.tcn(x)
+        x = self.global_pooling(x).squeeze(-1)
         return x
 
 # ------------------------------
-# CNN Model for SOH Estimation
+# TCN Model for SOH Estimation
 # ------------------------------
-class CNNModel(nn.Module):
+class TCNModel(nn.Module):
     def __init__(self, input_dim=5, embed_dim=256):
-        super(CNNModel, self).__init__()
-        self.feature_extractor = CNNFeatureExtractor(input_dim, embed_dim)
+        super(TCNModel, self).__init__()
+        self.feature_extractor = TCNFeatureExtractor(input_dim, embed_dim)
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),

@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from utils_CNN import truncated_normal_, CNNModel, SOHDataset, create_sequences
+from utils_TCN import truncated_normal_, TCNModel, SOHDataset, create_sequences
 
 # MONITORING =============================================================================================
 
@@ -122,7 +122,7 @@ test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
 
 # MODELS - TRAINING ======================================================================================
 
-model = CNNModel(input_dim=NUM_FEATURES, embed_dim=256).to(device)
+model = TCNModel(input_dim=NUM_FEATURES, embed_dim=256).to(device)
 
 criterion = nn.MSELoss()
 optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-4)
@@ -145,7 +145,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             optimizer.step()
             train_loss += loss.item()
 
-        # Validation
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
@@ -159,12 +158,11 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
         print(f"Epoch {epoch+1}/{num_epochs}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), "models/best_cnn_model.pth")
+            torch.save(model.state_dict(), "models/best_tcn_model.pth")
 
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_CNN.csv', 1), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_TCN.csv', 1), daemon=True)
 monitor_thread.start()
 
 # Train the model
@@ -175,7 +173,7 @@ monitoring = False
 # MODELS - TESTING =======================================================================================
 
 def evaluate_model(model, test_loader):
-    model.load_state_dict(torch.load("models/best_cnn_model.pth"))
+    model.load_state_dict(torch.load("models/best_tcn_model.pth"))
     model.eval()
 
     all_preds, all_targets = [], []
@@ -198,13 +196,13 @@ def evaluate_model(model, test_loader):
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
 
-    with open('outputs/error_results_CNN.txt', "w") as f:
+    with open('outputs/error_results_TCN.txt', "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\nTest MAE: {mae:.4f}\nTest R²: {r2:.4f}")
 
 time.sleep(2)
 
 monitoring = True
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_CNN.csv', 0.01), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_TCN.csv', 0.01), daemon=True)
 monitor_thread.start()
 
 start_time = time.time()
