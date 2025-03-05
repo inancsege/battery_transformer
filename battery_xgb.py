@@ -1,46 +1,15 @@
-import pandas as pd
+import torch
 import numpy as np
 import xgboost as xgb
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
 
-from utils_CNN import truncated_normal_, CNNModel, SOHDataset, create_sequences
+from utils import load_and_proc_data_xgb, monitor_idle_gpu_cpu
 
 # MONITORING =============================================================================================
 
-import subprocess, threading, time, psutil
+import threading, subprocess, time, psutil
 
-def monitor_idle_gpu_cpu(duration=10, interval=1):
-    
-    power_values = []
-    gpu_util_values = []
-    cpu_util_values = []
-    
-    start_time = time.time()
-    
-    while time.time() - start_time < duration:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=power.draw,utilization.gpu", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True
-        )
-        
-        power, gpu_util = map(float, result.stdout.strip().split(", "))
-        cpu_util = psutil.cpu_percent(interval=0.1)
-        
-        power_values.append(power)
-        gpu_util_values.append(gpu_util)
-        cpu_util_values.append(cpu_util)
-        
-        time.sleep(interval)
-    
-    avg_power = sum(power_values) / len(power_values)
-    avg_gpu_util = sum(gpu_util_values) / len(gpu_util_values)
-    avg_cpu_util = sum(cpu_util_values) / len(cpu_util_values)
-    
-    return avg_power, avg_gpu_util, avg_cpu_util
-
-avg_time = 1
+avg_time = 10
 avg_power, avg_gpu_util, avg_cpu_util = monitor_idle_gpu_cpu(duration=avg_time)
 
 print(f'\nAverage values over {avg_time} seconds: \nAVG_GPU_POWER = {avg_power}, AVG_GPU_UTIL = {avg_gpu_util}, AVG_CPU_UTIL = {avg_cpu_util}\n')
@@ -82,19 +51,16 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
 # DATA PREPROC ===========================================================================================
 
-df = pd.read_csv("data/battery/scaledData1_with_soh.csv")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+file_list = ["data/battery/scaledData1_with_soh.csv"]
+SEQ_LEN = 100
+BATCH_SIZE = 32
 features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
-X = df[features].values
+NUM_FEATURES = len(features)
 
-y = df["soh (%)"].values if "soh (%)" in df.columns else None
-
-scaler_data = StandardScaler()
-X = scaler_data.fit_transform(X)
-y = y / 100
-
-X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
-X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.15, random_state=42)
+X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(file_list,
+                                                                                     features = features)
 
 # MODELS - TRAINING ======================================================================================
 
@@ -105,7 +71,8 @@ xgb_model = xgb.XGBRegressor(
     max_depth=6, 
     subsample=0.8, 
     colsample_bytree=0.8, 
-    tree_method='gpu_hist',
+    tree_method='hist',
+    device='cuda',
     eval_metric='rmse',
     early_stopping_rounds=50,
     random_state=42
@@ -123,7 +90,7 @@ xgb_model.fit(
 
 monitoring = False
 
-xgb_model.save_model("models/best_xgb_model.json")
+xgb_model.save_model("models/best_XGB.json")
 
 #loaded_model = xgb.XGBRegressor()
 #loaded_model.load_model("xgboost_model.json")
