@@ -79,7 +79,7 @@ optimizer = optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
 monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_LSTM.csv', 1), daemon=True)
 monitor_thread.start()
 
-train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_LSTM.pth", device, num_epochs=200)
+train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_LSTM.pth", device, num_epochs=50)
 
 monitoring = False
 time.sleep(2)

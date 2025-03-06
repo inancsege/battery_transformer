@@ -326,7 +326,7 @@ def load_and_proc_data(file_list,
     X_list = []
     y_list = []
 
-    for file in file_list:
+    for file in file_list[:5]:
         df = pd.read_csv(file)
         
         X_list.append(df[features].values)
@@ -375,20 +375,20 @@ def load_and_proc_data_xgb(file_list,
     X_list = []
     y_list = []
 
-    for file in file_list:
+    for file in file_list[:5]:
         df = pd.read_csv(file)
         
         X_list.append(df[features].values)
         
-        if "soh (%)" in df.columns:
-            y_list.append(df["soh (%)"].values)
+        if "available_capacity (Ah)" in df.columns:
+            y_list.append(df["available_capacity (Ah)"].values)
 
     X = np.vstack(X_list)
     y = np.concatenate(y_list) if y_list else None
 
     scaler_data = StandardScaler()
     X = scaler_data.fit_transform(X)
-    y = y / 100
+    y = y / y.max()
 
     X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
     X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.15, random_state=42)
