@@ -323,27 +323,24 @@ def load_and_proc_data(file_list,
                        model_type = None):
     
     
-    X_list = []
-    y_list = []
+    X_seq = []
+    y_seq = []
+
+    NUM_FEATURES = len(features)
 
     for file in file_list[:5]:
         df = pd.read_csv(file)
         
-        X_list.append(df[features].values)
-        
-        if "available_capacity (Ah)" in df.columns:
-            y_list.append(df["available_capacity (Ah)"].values)
+        X = df[features].values
+        y = df["available_capacity (Ah)"].values
 
-    X = np.vstack(X_list)
-    y = np.concatenate(y_list) if y_list else None
+        scaler_data = StandardScaler()
+        X = scaler_data.fit_transform(X)
+        y = y / 135
 
-    scaler_data = StandardScaler()
-    X = scaler_data.fit_transform(X)
-    y = y / y.max()
-
-    NUM_FEATURES = len(features)
-
-    X_seq, y_seq = create_sequences(X, y, SEQ_LEN)
+        X_seq_temp, y_seq_temp = create_sequences(X, y, SEQ_LEN)
+        X_seq.extend(X_seq_temp)
+        y_seq.extend(y_seq_temp)
 
     train_size = int(0.8 * len(X_seq))
     val_size = int(0.1 * len(X_seq))
@@ -388,7 +385,7 @@ def load_and_proc_data_xgb(file_list,
 
     scaler_data = StandardScaler()
     X = scaler_data.fit_transform(X)
-    y = y / y.max()
+    y = y / 135
 
     X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
     X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.15, random_state=42)
