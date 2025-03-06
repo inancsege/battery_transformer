@@ -52,7 +52,12 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-file_list = ["data/battery/scaledData1_with_soh.csv"]
+import os
+directory = "data/battery/csv"
+file_list = csv_files = [f for f in os.listdir(directory) if f.endswith(".csv")]
+for f in file_list:
+    print(f)
+    
 SEQ_LEN = 100
 BATCH_SIZE = 32
 features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
@@ -74,7 +79,7 @@ optimizer = optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
 monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_LSTM.csv', 1), daemon=True)
 monitor_thread.start()
 
-train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_LSTM.pth", device, num_epochs=20)
+train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_LSTM.pth", device, num_epochs=200)
 
 monitoring = False
 time.sleep(2)
