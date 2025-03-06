@@ -1,3 +1,5 @@
-Test RMSE: 0.0109
-Test MAE: 0.0097
-Test R²: -4.1171
+Test RMSE: 0.0538
+Test MAE: 0.0461
+Test R²: 0.9270
+Test PCC: 0.9860
+Test MDA: 0.9997
