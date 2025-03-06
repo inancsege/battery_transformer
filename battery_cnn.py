@@ -54,7 +54,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import os
 directory = "data/battery/csv"
-file_list = csv_files = [f for f in os.listdir(directory) if f.endswith(".csv")]
+file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
 for f in file_list:
     print(f)
     

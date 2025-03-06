@@ -331,15 +331,15 @@ def load_and_proc_data(file_list,
         
         X_list.append(df[features].values)
         
-        if "soh (%)" in df.columns:
-            y_list.append(df["soh (%)"].values)
+        if "available_capacity (Ah)" in df.columns:
+            y_list.append(df["available_capacity (Ah)"].values)
 
     X = np.vstack(X_list)
     y = np.concatenate(y_list) if y_list else None
 
     scaler_data = StandardScaler()
     X = scaler_data.fit_transform(X)
-    y = y / 100
+    y = y / y.max()
 
     NUM_FEATURES = len(features)
 
