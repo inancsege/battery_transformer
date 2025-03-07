@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from scipy.stats import pearsonr
 
 from utils import load_and_proc_data_xgb, monitor_idle_gpu_cpu
 
@@ -107,14 +108,32 @@ def evaluate_model(model, X_test, y_test):
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
     mae = mean_absolute_error(y_test, predictions)
     r2 = r2_score(y_test, predictions)
+
+    all_targets = y_test
+    all_preds = predictions
     
+    # Compute Pearson Correlation Coefficient (PCC)
+    pcc, _ = pearsonr(all_targets, all_preds)
+
+    # Compute Mean Directional Accuracy (MDA)
+    direction_actual = np.sign(np.diff(all_targets))  # Actual trend (1 = up, -1 = down, 0 = no change)
+    direction_pred = np.sign(np.diff(all_preds))  # Predicted trend
+
+    mda = np.mean(direction_actual == direction_pred)  # Percentage of correctly predicted directions
+
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
+    print(f"Test PCC: {pcc:.4f}")
+    print(f"Test MDA: {mda:.4f}")
 
     with open('outputs/error_results_XGB.txt', "w") as f:
-        f.write(f"Test RMSE: {rmse:.4f}\nTest MAE: {mae:.4f}\nTest R²: {r2:.4f}")
-
+        f.write(f"Test RMSE: {rmse:.4f}\n")
+        f.write(f"Test MAE: {mae:.4f}\n")
+        f.write(f"Test R²: {r2:.4f}\n")
+        f.write(f"Test PCC: {pcc:.4f}\n")
+        f.write(f"Test MDA: {mda:.4f}\n")
+        
 time.sleep(2)
 
 monitoring = True
