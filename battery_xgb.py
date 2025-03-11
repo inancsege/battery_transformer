@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import xgboost as xgb
+import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from scipy.stats import pearsonr
 
@@ -62,7 +63,7 @@ for f in file_list:
     
 SEQ_LEN = 100
 BATCH_SIZE = 32
-features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
+features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(file_list,
@@ -103,7 +104,7 @@ xgb_model.save_model("models/best_XGB.json")
 
 # MODELS - TESTING =======================================================================================
 
-def evaluate_model(model, X_test, y_test):
+def evaluate_model(model, X_test, y_test, plot_model_name, plot_fig = True):
     predictions = model.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
     mae = mean_absolute_error(y_test, predictions)
@@ -133,6 +134,21 @@ def evaluate_model(model, X_test, y_test):
         f.write(f"Test R²: {r2:.4f}\n")
         f.write(f"Test PCC: {pcc:.4f}\n")
         f.write(f"Test MDA: {mda:.4f}\n")
+
+    if plot_fig:
+
+        ind = np.random.randint(0, len(y_test) - 100)
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(predictions[ind:ind+100], label="predicted", linestyle="dashed", alpha=0.7)
+        plt.plot(y_test[ind:ind+100], label="target", linestyle="solid", alpha=0.7)
+        
+        plt.ylabel("SOH (%)")
+        plt.xticks([])
+        plt.title(f'{plot_model_name} example')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f'outputs/figures/{plot_model_name}_example.png')
         
 time.sleep(2)
 
@@ -141,7 +157,7 @@ monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(xgb_model, X_test, y_test)
+evaluate_model(xgb_model, X_test, y_test, 'xgb', plot_fig = True)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False

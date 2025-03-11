@@ -55,4 +55,4 @@ ax.set_xticklabels(metrics.keys())
 ax.legend()
 
 plt.tight_layout()
-plt.savefig('outputs/metric_results.png')
+plt.savefig('outputs/figures/metric_results.png')

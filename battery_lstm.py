@@ -60,7 +60,7 @@ for f in file_list:
     
 SEQ_LEN = 100
 BATCH_SIZE = 32
-features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
+features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
@@ -91,7 +91,7 @@ monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(model, test_loader, "models/best_LSTM.pth", 'outputs/error_results_LSTM.txt', device)
+evaluate_model(model, test_loader, "models/best_LSTM.pth", 'outputs/error_results_LSTM.txt', 'lstm', plot_fig = True, device=device)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False

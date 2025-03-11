@@ -64,4 +64,4 @@ plt.title("Energy Consumption and Memory Usage Across ML Methods")
 # Show plot
 plt.tight_layout()
 plt.grid()
-plt.savefig('outputs/hw_usage_TRAINING_results.png')
+plt.savefig('outputs/figures/hw_usage_TRAINING_results.png')

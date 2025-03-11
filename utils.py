@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import subprocess, time, psutil
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -149,42 +150,43 @@ class TransformerEncoder(nn.Module):
         return x
 
 class SOHTransformer(nn.Module):
-    def __init__(self, input_dim=5, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
+    def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
         super(SOHTransformer, self).__init__()
-
-        self.embedding = InputEmbedding(input_dim, embed_dim)
-        self.encoder = TransformerEncoder(embed_dim, num_blocks, num_heads, ffn_dim, drop_path_rate)
+        self.embedding = nn.Linear(input_dim, embed_dim)
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=ffn_dim, dropout=drop_path_rate, batch_first=True),
+            num_layers=num_blocks
+        )
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 1)  # Regression output for SOH estimation
+            nn.Linear(embed_dim // 2, 100)  # Predicting next 100 available_capacity values
         )
-
+    
     def forward(self, x):
         x = self.embedding(x)
         x = self.encoder(x)
-        return self.mlp_head(x[:, 0])  # Using CLS token for SOH prediction
+        return self.mlp_head(x[:, -1])
 
 # ------------------------------
 # LSTM Model
 # ------------------------------
 
 class SOHLSTM(nn.Module):
-    def __init__(self, input_dim=5, hidden_dim=128, num_layers=2, dropout=0.1):
+    def __init__(self, input_dim=6, hidden_dim=128, num_layers=2, dropout=0.1):
         super(SOHLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers, 
-                            batch_first=True, dropout=dropout, bidirectional=False)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout, bidirectional=False)
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)  # Regression output for SOH estimation
+            nn.Linear(hidden_dim // 2, 100)
         )
-
+    
     def forward(self, x):
-        lstm_out, _ = self.lstm(x)  # Output shape: (batch_size, seq_len, hidden_dim)
-        x = lstm_out[:, -1, :]  # Take the last time step's output
-        return self.fc(x)  # Final regression output
+        lstm_out, _ = self.lstm(x)
+        x = lstm_out[:, -1, :]
+        return self.fc(x)
 
 # ------------------------------
 # CNN Model
@@ -200,14 +202,17 @@ class CNNFeatureExtractor(nn.Module):
         
         self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_sizes[1], stride=strides[1])
         self.bn2 = nn.BatchNorm1d(embed_dim)
+
+        self.global_pooling = nn.AdaptiveAvgPool1d(1)
         
     def forward(self, x):
         """
         x: (batch_size, channels, time_steps)
         """
+        x = x.permute(0, 2, 1)
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
-        x = torch.mean(x, dim=-1)  # Global average pooling
+        x = self.global_pooling(x).squeeze(-1)
         return x
     
 class SOHCNN(nn.Module):
@@ -217,7 +222,7 @@ class SOHCNN(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 1)  # Regression output
+            nn.Linear(embed_dim // 2, 100)  # Regression output
         )
     
     def forward(self, x):
@@ -260,6 +265,7 @@ class TCNFeatureExtractor(nn.Module):
         self.global_pooling = nn.AdaptiveAvgPool1d(1)
     
     def forward(self, x):
+        x = x.permute(0, 2, 1)
         x = self.tcn(x)
         x = self.global_pooling(x).squeeze(-1)
         return x
@@ -271,7 +277,7 @@ class SOHTCN(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 1)  # Regression output
+            nn.Linear(embed_dim // 2, 100)  # Regression output
         )
     
     def forward(self, x):
@@ -284,8 +290,8 @@ class SOHTCN(nn.Module):
 
 class SOHDataset(Dataset):
     def __init__(self, X, y):
-        self.X = torch.tensor(X).permute(0, 2, 1)
-        self.y = torch.tensor(y).float()
+        self.X = torch.tensor(np.array(X), dtype=torch.float32)
+        self.y = torch.tensor(np.array(y), dtype=torch.float32).float()
 
     def __len__(self):
         return len(self.X)
@@ -295,8 +301,8 @@ class SOHDataset(Dataset):
     
 class SOHDatasetLSTM(Dataset):
     def __init__(self, X, y):
-        self.X = torch.tensor(X, dtype=torch.float32)  # Ensure float32 for LSTM
-        self.y = torch.tensor(y, dtype=torch.float32)
+        self.X = torch.tensor(np.array(X), dtype=torch.float32)
+        self.y = torch.tensor(np.array(y), dtype=torch.float32).float()
 
     def __len__(self):
         return len(self.X)
@@ -305,30 +311,26 @@ class SOHDatasetLSTM(Dataset):
         return self.X[idx], self.y[idx]
     
 def create_sequences(X, y, seq_len):
-    
+
     sequences = []
     targets = []
     
-    for i in range(0, len(X) - seq_len, seq_len):
+    for i in range(len(X) - seq_len * 2):
         sequences.append(X[i:i+seq_len])
-        if y is not None:
-            targets.append(y[i+seq_len-1])
+        targets.append(y[i+seq_len:i+seq_len*2])
     
     return np.array(sequences, dtype=np.float32), np.array(targets, dtype=np.float32)
 
 def load_and_proc_data(file_list,
-                       features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc'],
-                       SEQ_LEN = 100, 
-                       BATCH_SIZE = 32,
-                       model_type = None):
-    
+                       features=['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)'],
+                       SEQ_LEN=100, 
+                       BATCH_SIZE=32,
+                       model_type=None):
     
     X_seq = []
     y_seq = []
 
-    NUM_FEATURES = len(features)
-
-    for file in file_list[:5]:
+    for file in file_list[:1]:
         df = pd.read_csv(file)
         
         X = df[features].values
@@ -375,10 +377,10 @@ def load_and_proc_data_xgb(file_list,
     for file in file_list[:5]:
         df = pd.read_csv(file)
         
-        X_list.append(df[features].values)
+        X_list.append(df[features].values[:-1])
         
         if "available_capacity (Ah)" in df.columns:
-            y_list.append(df["available_capacity (Ah)"].values)
+            y_list.append(df["available_capacity (Ah)"].values[1:])
 
     X = np.vstack(X_list)
     y = np.concatenate(y_list) if y_list else None
@@ -429,7 +431,7 @@ def monitor_idle_gpu_cpu(duration=10, interval=1):
 # TRAINING & TESTING
 # ------------------------------
 
-def train_model(model, train_loader, val_loader, criterion, optimizer, model_save_file = "models/best_model.pth", device = torch.device("cpu"), num_epochs=20):
+def train_model(model, train_loader, val_loader, criterion, optimizer, model_save_file="models/best_model.pth", device=torch.device("cpu"), num_epochs=20):
     best_val_loss = float("inf")
 
     for epoch in range(num_epochs):
@@ -440,7 +442,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, model_sav
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
 
             optimizer.zero_grad()
-            outputs = model(batch_X).squeeze()
+            outputs = model(batch_X)  # No squeeze(), keeping (batch_size, seq_len)
 
             loss = criterion(outputs, batch_y)
             loss.backward()
@@ -452,7 +454,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, model_sav
         with torch.no_grad():
             for batch_X, batch_y in val_loader:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                outputs = model(batch_X).squeeze()
+                outputs = model(batch_X)
                 val_loss += criterion(outputs, batch_y).item()
 
         train_loss /= len(train_loader)
@@ -464,45 +466,51 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, model_sav
             best_val_loss = val_loss
             torch.save(model.state_dict(), model_save_file)
 
-def evaluate_model(model, test_loader, model_save_file, output_save_file, device=torch.device("cpu")):
+def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_model_name='model', plot_fig = True, device=torch.device("cpu")):
     model.load_state_dict(torch.load(model_save_file))
     model.eval()
+
+    first_test_flag = True
 
     all_preds, all_targets = [], []
     with torch.no_grad():
         for batch_X, batch_y in test_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            outputs = model(batch_X).squeeze()
+            outputs = model(batch_X)
+
+            if first_test_flag and plot_fig:
+                pred_out = outputs[0].cpu().numpy()
+                target_out = batch_y[0].cpu().numpy()
+                first_test_flag = False
 
             all_preds.append(outputs.cpu().numpy())
             all_targets.append(batch_y.cpu().numpy())
 
-    all_preds = np.concatenate(all_preds)
-    all_targets = np.concatenate(all_targets)
+    all_preds = np.concatenate(all_preds, axis=0)
+    all_targets = np.concatenate(all_targets, axis=0)
 
     # Compute error metrics
     rmse = np.sqrt(mean_squared_error(all_targets, all_preds))
     mae = mean_absolute_error(all_targets, all_preds)
     r2 = r2_score(all_targets, all_preds)
 
-    # Compute Pearson Correlation Coefficient (PCC)
-    pcc, _ = pearsonr(all_targets, all_preds)
-
-    # Compute Mean Directional Accuracy (MDA)
-    direction_actual = np.sign(np.diff(all_targets))  # Actual trend (1 = up, -1 = down, 0 = no change)
-    direction_pred = np.sign(np.diff(all_preds))  # Predicted trend
-
-    mda = np.mean(direction_actual == direction_pred)  # Percentage of correctly predicted directions
-
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
-    print(f"Test PCC: {pcc:.4f}")
-    print(f"Test MDA: {mda:.4f}")
 
     with open(output_save_file, "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\n")
         f.write(f"Test MAE: {mae:.4f}\n")
         f.write(f"Test R²: {r2:.4f}\n")
-        f.write(f"Test PCC: {pcc:.4f}\n")
-        f.write(f"Test MDA: {mda:.4f}\n")
+
+    if plot_fig:
+        plt.figure(figsize=(10, 5))
+        plt.plot(pred_out, label="predicted", linestyle="dashed", alpha=0.7)
+        plt.plot(target_out, label="target", linestyle="solid", alpha=0.7)
+        
+        plt.ylabel("SOH (%)")
+        plt.xticks([])
+        plt.title(f'{plot_model_name} example')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f'outputs/figures/{plot_model_name}_example.png')

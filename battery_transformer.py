@@ -8,7 +8,7 @@ from utils import SOHTransformer, load_and_proc_data, monitor_idle_gpu_cpu, trai
 
 import threading, subprocess, time, psutil
 
-avg_time = 10
+avg_time = 1
 avg_power, avg_gpu_util, avg_cpu_util = monitor_idle_gpu_cpu(duration=avg_time)
 
 print(f'\nAverage values over {avg_time} seconds: \nAVG_GPU_POWER = {avg_power}, AVG_GPU_UTIL = {avg_gpu_util}, AVG_CPU_UTIL = {avg_cpu_util}\n')
@@ -60,7 +60,7 @@ for f in file_list:
 
 SEQ_LEN = 100
 BATCH_SIZE = 32
-features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']
+features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
@@ -90,7 +90,7 @@ monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(model, test_loader, "models/best_TRANSFORMER.pth", 'outputs/error_results_TRANSFORMER.txt', device)
+evaluate_model(model, test_loader, "models/best_TRANSFORMER.pth", 'outputs/error_results_TRANSFORMER.txt', 'transformer', plot_fig = True, device=device)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False
