@@ -323,6 +323,7 @@ def create_sequences(X, y, seq_len):
 
 def load_and_proc_data(file_list,
                        features=['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)'],
+                       targets = ['available_capacity (Ah)'],
                        SEQ_LEN=100, 
                        BATCH_SIZE=32,
                        model_type=None):
@@ -334,7 +335,7 @@ def load_and_proc_data(file_list,
         df = pd.read_csv(file)
         
         X = df[features].values
-        y = df["available_capacity (Ah)"].values
+        y = df[targets[0]].values
 
         scaler_data = StandardScaler()
         X = scaler_data.fit_transform(X)
@@ -368,7 +369,8 @@ def load_and_proc_data(file_list,
     return X, y, train_loader, val_loader, test_loader, scaler_data
 
 def load_and_proc_data_xgb(file_list,
-                           features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc']):
+                           features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc'],
+                           targets = ['available_capacity (Ah)']):
     
     
     X_list = []
@@ -379,8 +381,7 @@ def load_and_proc_data_xgb(file_list,
         
         X_list.append(df[features].values[:-1])
         
-        if "available_capacity (Ah)" in df.columns:
-            y_list.append(df["available_capacity (Ah)"].values[1:])
+        y_list.append(df[targets[0]].values[1:])
 
     X = np.vstack(X_list)
     y = np.concatenate(y_list) if y_list else None

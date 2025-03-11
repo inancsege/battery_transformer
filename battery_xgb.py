@@ -64,6 +64,7 @@ for f in file_list:
 SEQ_LEN = 100
 BATCH_SIZE = 32
 features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
+targets = ['available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(file_list,

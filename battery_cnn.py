@@ -61,10 +61,12 @@ for f in file_list:
 SEQ_LEN = 100
 BATCH_SIZE = 32
 features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
+targets = ['available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
                                                                               features = features,
+                                                                              targets=targets,
                                                                               SEQ_LEN = SEQ_LEN,
                                                                               BATCH_SIZE = BATCH_SIZE)
 

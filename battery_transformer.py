@@ -55,6 +55,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import os
 directory = "data/battery/csv"
 file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
+targets = ['available_capacity (Ah)']
 for f in file_list:
     print(f)
 
@@ -65,6 +66,7 @@ NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
                                                                               features = features,
+                                                                              targets=targets,
                                                                               SEQ_LEN = SEQ_LEN,
                                                                               BATCH_SIZE = BATCH_SIZE)
 
