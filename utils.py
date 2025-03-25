@@ -48,11 +48,11 @@ class InputEmbedding(nn.Module):
         x: (batch_size, channels, time_steps)
         Output: (batch_size, seq_len+1, embed_dim)
         """
+        x = x.permute(0, 2, 1)
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
-
+        
         x = x.permute(0, 2, 1)  # Reshape for transformer (batch_size, seq_len, embed_dim)
-
         batch_size = x.shape[0]
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
@@ -150,9 +150,10 @@ class TransformerEncoder(nn.Module):
         return x
 
 class SOHTransformer(nn.Module):
-    def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
+    #def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
+    def __init__(self, input_dim=6, embed_dim=128, num_blocks=2, num_heads=8, ffn_dim=512, drop_path_rate=0.1):
         super(SOHTransformer, self).__init__()
-        self.embedding = nn.Linear(input_dim, embed_dim)
+        self.embedding = InputEmbedding(input_dim, embed_dim)
         self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=ffn_dim, dropout=drop_path_rate, batch_first=True),
             num_layers=num_blocks
@@ -162,6 +163,29 @@ class SOHTransformer(nn.Module):
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
             nn.Linear(embed_dim // 2, 100)  # Predicting next 100 available_capacity values
+            #nn.Linear(embed_dim // 2, 200)  # Predicting next 100 available_capacity values
+        )
+    
+    def forward(self, x):
+        x = self.embedding(x)
+        x = self.encoder(x)
+        return self.mlp_head(x[:, -1])
+    
+class SOHTransformerHDMR(nn.Module):
+    #def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
+    def __init__(self, input_dim=6, embed_dim=128, num_blocks=2, num_heads=8, ffn_dim=512, drop_path_rate=0.1):
+        super(SOHTransformerHDMR, self).__init__()
+        self.embedding = InputEmbedding(input_dim, embed_dim)
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=ffn_dim, dropout=drop_path_rate, batch_first=True),
+            num_layers=num_blocks
+        )
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim // 2, 100)  # Predicting next 100 available_capacity values
+            #nn.Linear(embed_dim // 2, 200)  # Predicting next 100 available_capacity values
         )
     
     def forward(self, x):
@@ -331,15 +355,21 @@ def load_and_proc_data(file_list,
     X_seq = []
     y_seq = []
 
-    for file in file_list[:1]:
+    data_num = 5
+    file_list = file_list[:data_num]
+    for f in file_list:
+        print(f)
+
+    for file in file_list:
         df = pd.read_csv(file)
         
         X = df[features].values
         y = df[targets[0]].values
 
         scaler_data = StandardScaler()
-        X = scaler_data.fit_transform(X)
-        y = y / 135
+        X = scaler_data.fit_transform(X).astype(np.float16)
+
+        y = (y / 1200).astype(np.float16)
 
         X_seq_temp, y_seq_temp = create_sequences(X, y, SEQ_LEN)
         X_seq.extend(X_seq_temp)
@@ -467,7 +497,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, model_sav
             best_val_loss = val_loss
             torch.save(model.state_dict(), model_save_file)
 
-def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_model_name='model', plot_fig = True, device=torch.device("cpu")):
+def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_model_name='model', plot_fig = True, device=torch.device("cpu"), return_error_results = False, use_gpu = True):
     model.load_state_dict(torch.load(model_save_file))
     model.eval()
 
@@ -476,7 +506,8 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
     all_preds, all_targets = [], []
     with torch.no_grad():
         for batch_X, batch_y in test_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            if use_gpu:
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             outputs = model(batch_X)
 
             if first_test_flag and plot_fig:
@@ -490,19 +521,41 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
     all_preds = np.concatenate(all_preds, axis=0)
     all_targets = np.concatenate(all_targets, axis=0)
 
+    print(all_targets.shape)
+    print(all_preds.shape)
+
     # Compute error metrics
     rmse = np.sqrt(mean_squared_error(all_targets, all_preds))
     mae = mean_absolute_error(all_targets, all_preds)
     r2 = r2_score(all_targets, all_preds)
 
+    # Compute MAPE (avoid division by zero)
+    non_zero_mask = all_targets != 0
+    mape = np.mean(np.abs((all_targets[non_zero_mask] - all_preds[non_zero_mask]) / all_targets[non_zero_mask])) * 100
+
+    # Compute Pearson Correlation Coefficient (PCC)
+    pcc = np.array([pearsonr(all_targets[:, i], all_preds[:, i])[0] for i in range(all_targets.shape[1])])
+
+    # Compute Mean Directional Accuracy (MDA)
+    direction_actual = np.sign(np.diff(all_targets))
+    direction_pred = np.sign(np.diff(all_preds))
+
+    mda = np.mean(direction_actual == direction_pred)
+
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
+    print(f"Test MAPE: {mape:.2f}%")
+    print(f"Test PCC: {pcc}")
+    print(f"Test MDA: {mda}")
 
     with open(output_save_file, "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\n")
         f.write(f"Test MAE: {mae:.4f}\n")
         f.write(f"Test R²: {r2:.4f}\n")
+        f.write(f"Test MAPE: {mape:.2f}%\n")
+        f.write(f"Test PCC: {pcc}\n")
+        f.write(f"Test MDA: {mda}\n")
 
     if plot_fig:
         plt.figure(figsize=(10, 5))
@@ -515,3 +568,7 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
         plt.legend()
         plt.grid(True)
         plt.savefig(f'outputs/figures/{plot_model_name}_example.png')
+
+    if return_error_results:
+        return rmse, mae, r2, mape, pcc, mda
+    

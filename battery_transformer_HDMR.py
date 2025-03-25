@@ -3,13 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from utils import SOHTransformer, load_and_proc_data, monitor_idle_gpu_cpu, train_model, evaluate_model, SOHDataset
+from utils import SOHTransformerHDMR, load_and_proc_data, monitor_idle_gpu_cpu, train_model, evaluate_model, SOHDataset
 
 # MONITORING =============================================================================================
 
 import threading, subprocess, time, psutil
 
-avg_time = 60
+avg_time = 1
 avg_power, avg_gpu_util, avg_cpu_util = monitor_idle_gpu_cpu(duration=avg_time)
 
 print(f'\nAverage values over {avg_time} seconds: \nAVG_GPU_POWER = {avg_power}, AVG_GPU_UTIL = {avg_gpu_util}, AVG_CPU_UTIL = {avg_cpu_util}\n')
@@ -77,15 +77,15 @@ torch.save({'X': X_test_tensor, 'y': y_test_tensor}, 'test_dataset.pt')
 
 # MODELS - TRAINING ======================================================================================
 
-model = SOHTransformer(input_dim=NUM_FEATURES, embed_dim=256).to(device)
+model = SOHTransformerHDMR(input_dim=NUM_FEATURES, embed_dim=256).to(device)
 
 criterion = nn.MSELoss()
 optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-4)
 
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_TRANSFORMER_SUNUM.csv', 1), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_TRANSFORMER_HDMR_SUNUM.csv', 1), daemon=True)
 monitor_thread.start()
 
-train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_TRANSFORMER_SUNUM.pth", device, num_epochs=100)
+train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_TRANSFORMER_HDMR_SUNUM.pth", device, num_epochs=1)
 
 monitoring = False
 time.sleep(2)
@@ -101,11 +101,11 @@ test_dataset = SOHDataset(X_loaded, y_loaded)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32)
 '''
 monitoring = True
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_TRANSFORMER_SUNUM.csv', 0.01), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_TRANSFORMER_HDMR_SUNUM.csv', 0.01), daemon=True)
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(model, test_loader, "models/best_TRANSFORMER_SUNUM.pth", 'outputs/error_results_TRANSFORMER_SUNUM.txt', 'transformer_SUNUM', plot_fig = True, device=device)
+evaluate_model(model, test_loader, "models/best_TRANSFORMER_HDMR_SUNUM.pth", 'outputs/error_results_TRANSFORMER_HDMR_SUNUM.txt', 'transformer_HDMR_SUNUM', plot_fig = True, device=device)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False
