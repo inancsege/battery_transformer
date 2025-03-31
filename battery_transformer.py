@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
 
-from utils import SOHTransformer, load_and_proc_data, monitor_idle_gpu_cpu, train_model, evaluate_model, SOHDataset
+from utils import SOHTransformer, load_and_proc_data, monitor_idle_gpu_cpu, train_model, evaluate_model
 
 # MONITORING =============================================================================================
 
@@ -16,7 +15,7 @@ print(f'\nAverage values over {avg_time} seconds: \nAVG_GPU_POWER = {avg_power},
 
 monitoring = True
 
-def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 10):
+def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
     query_params = [
         "timestamp", "power.draw", "memory.used", "memory.total",
@@ -37,8 +36,7 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 10):
             capture_output=True, text=True
         )
 
-        gpu_raw = result.stdout.strip().split(", ")[1:]
-        gpu_data = [float(x) if x != '[N/A]' else 0.0 for x in gpu_raw]
+        gpu_data = list(map(float, result.stdout.strip().split(", ")[1:]))
         gpu_data[0] = gpu_data[0] - avg_power
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         cpu_usage = psutil.cpu_percent() - avg_cpu_util
@@ -55,16 +53,15 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 10):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import os
-directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data"
-file_list = sorted([directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")])
+directory = "data/battery/csv"
+file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
 targets = ['available_capacity (Ah)']
+for f in file_list:
+    print(f)
 
-SEQ_LEN = 10
-BATCH_SIZE = 128
-
-features = ['voltage mean','voltage std','voltage kurtosis','voltage skewness','CC Q','CC charge time','voltage slope','voltage entropy','current mean','current std','current kurtosis','current skewness','CV Q','CV charge time','current slope','current entropy','capacity']
-targets = ['capacity']
-
+SEQ_LEN = 100
+BATCH_SIZE = 32
+features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
 NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
@@ -73,12 +70,6 @@ _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(fi
                                                                               SEQ_LEN = SEQ_LEN,
                                                                               BATCH_SIZE = BATCH_SIZE)
 
-# Save the underlying tensors of the dataset
-X_test_tensor = test_loader.dataset.X
-y_test_tensor = test_loader.dataset.y
-
-torch.save({'X': X_test_tensor, 'y': y_test_tensor}, 'test_dataset.pt')
-
 # MODELS - TRAINING ======================================================================================
 
 model = SOHTransformer(input_dim=NUM_FEATURES, embed_dim=256).to(device)
@@ -86,30 +77,22 @@ model = SOHTransformer(input_dim=NUM_FEATURES, embed_dim=256).to(device)
 criterion = nn.MSELoss()
 optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-4)
 
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_TRANSFORMER_XJTU.csv', 1), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_training_TRANSFORMER.csv', 1), daemon=True)
 monitor_thread.start()
 
-train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_TRANSFORMER_XJTU.pth", device, num_epochs=50)
+train_model(model, train_loader, val_loader, criterion, optimizer, "models/best_TRANSFORMER.pth", device, num_epochs=50)
 
 monitoring = False
 time.sleep(2)
 
 # MODELS - TESTING =======================================================================================
-'''
-data = torch.load('test_dataset.pt')
-X_loaded = data['X']
-y_loaded = data['y']
 
-# Recreate dataset and dataloader
-test_dataset = SOHDataset(X_loaded, y_loaded)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32)
-'''
 monitoring = True
-monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_TRANSFORMER_XJTU.csv', 0.01), daemon=True)
+monitor_thread = threading.Thread(target=monitor_gpu, args=('outputs/log_testing_TRANSFORMER.csv', 0.01), daemon=True)
 monitor_thread.start()
 
 start_time = time.time()
-evaluate_model(model, test_loader, "models/best_TRANSFORMER_XJTU.pth", 'outputs/error_results_TRANSFORMER_XJTU.txt', 'transformer_XJTU', plot_fig = True, device=device)
+evaluate_model(model, test_loader, "models/best_TRANSFORMER.pth", 'outputs/error_results_TRANSFORMER.txt', 'transformer', plot_fig = True, device=device)
 print(f'{time.time()-start_time} seconds\n')
 
 monitoring = False

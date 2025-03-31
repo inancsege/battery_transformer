@@ -48,11 +48,11 @@ class InputEmbedding(nn.Module):
         x: (batch_size, channels, time_steps)
         Output: (batch_size, seq_len+1, embed_dim)
         """
-        x = x.permute(0, 2, 1)
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
-        
+
         x = x.permute(0, 2, 1)  # Reshape for transformer (batch_size, seq_len, embed_dim)
+
         batch_size = x.shape[0]
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
@@ -150,8 +150,7 @@ class TransformerEncoder(nn.Module):
         return x
 
 class SOHTransformer(nn.Module):
-    #def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
-    def __init__(self, input_dim=6, embed_dim=128, num_blocks=2, num_heads=8, ffn_dim=512, drop_path_rate=0.1):
+    def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
         super(SOHTransformer, self).__init__()
         self.embedding = nn.Linear(input_dim, embed_dim)
         self.encoder = nn.TransformerEncoder(
@@ -162,30 +161,7 @@ class SOHTransformer(nn.Module):
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 10)  # Predicting next 100 available_capacity values
-            #nn.Linear(embed_dim // 2, 200)  # Predicting next 200 available_capacity values
-        )
-    
-    def forward(self, x):
-        x = self.embedding(x)
-        x = self.encoder(x)
-        return self.mlp_head(x[:, -1])
-    
-class SOHTransformerHDMR(nn.Module):
-    #def __init__(self, input_dim=6, embed_dim=256, num_blocks=4, num_heads=16, ffn_dim=1024, drop_path_rate=0.1):
-    def __init__(self, input_dim=6, embed_dim=128, num_blocks=2, num_heads=8, ffn_dim=512, drop_path_rate=0.1):
-        super(SOHTransformerHDMR, self).__init__()
-        self.embedding = InputEmbedding(input_dim, embed_dim)
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dim_feedforward=ffn_dim, dropout=drop_path_rate, batch_first=True),
-            num_layers=num_blocks
-        )
-        self.mlp_head = nn.Sequential(
-            nn.LayerNorm(embed_dim),
-            nn.Linear(embed_dim, embed_dim // 2),
-            nn.ReLU(),
             nn.Linear(embed_dim // 2, 100)  # Predicting next 100 available_capacity values
-            #nn.Linear(embed_dim // 2, 200)  # Predicting next 100 available_capacity values
         )
     
     def forward(self, x):
@@ -204,7 +180,7 @@ class SOHLSTM(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 10)
+            nn.Linear(hidden_dim // 2, 100)
         )
     
     def forward(self, x):
@@ -246,7 +222,7 @@ class SOHCNN(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 10)  # Regression output
+            nn.Linear(embed_dim // 2, 100)  # Regression output
         )
     
     def forward(self, x):
@@ -301,7 +277,7 @@ class SOHTCN(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.Linear(embed_dim, embed_dim // 2),
             nn.ReLU(),
-            nn.Linear(embed_dim // 2, 10)  # Regression output
+            nn.Linear(embed_dim // 2, 100)  # Regression output
         )
     
     def forward(self, x):
@@ -349,28 +325,21 @@ def load_and_proc_data(file_list,
                        features=['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)'],
                        targets = ['available_capacity (Ah)'],
                        SEQ_LEN=100, 
-                       BATCH_SIZE=128,
+                       BATCH_SIZE=32,
                        model_type=None):
     
     X_seq = []
     y_seq = []
-    '''
-    data_num = 5
-    file_list = file_list[:data_num]
-    for f in file_list:
-        print(f)
-    '''
-    for file in file_list:
+
+    for file in file_list[:1]:
         df = pd.read_csv(file)
         
         X = df[features].values
         y = df[targets[0]].values
 
         scaler_data = StandardScaler()
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
         X = scaler_data.fit_transform(X)
-
-        y = (y / 2)
+        y = y / 135
 
         X_seq_temp, y_seq_temp = create_sequences(X, y, SEQ_LEN)
         X_seq.extend(X_seq_temp)
@@ -399,33 +368,30 @@ def load_and_proc_data(file_list,
 
     return X, y, train_loader, val_loader, test_loader, scaler_data
 
-
 def load_and_proc_data_xgb(file_list,
-                           features=['voltage mean', 'voltage std', 'voltage kurtosis', 'voltage skewness', 'CC Q',
-                                     'CC charge time', 'voltage slope', 'voltage entropy', 'current mean',
-                                     'current std', 'current kurtosis', 'current skewness', 'CV Q', 'CV charge time',
-                                     'current slope', 'current entropy', 'capacity'],
-                           targets=['capacity']):
+                           features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc'],
+                           targets = ['available_capacity (Ah)']):
+    
+    
     X_list = []
     y_list = []
 
-    for file in file_list:
+    for file in file_list[:5]:
         df = pd.read_csv(file)
-
+        
         X_list.append(df[features].values[:-1])
-
+        
         y_list.append(df[targets[0]].values[1:])
 
     X = np.vstack(X_list)
-    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
     y = np.concatenate(y_list) if y_list else None
 
     scaler_data = StandardScaler()
     X = scaler_data.fit_transform(X)
-    y = y / 2
+    y = y / 135
 
     X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.15, random_state=42)
 
     return X_train, X_val, X_test, y_train, y_val, y_test, scaler_data
 
@@ -501,7 +467,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, model_sav
             best_val_loss = val_loss
             torch.save(model.state_dict(), model_save_file)
 
-def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_model_name='model', plot_fig = True, device=torch.device("cpu"), return_error_results = False, use_gpu = True):
+def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_model_name='model', plot_fig = True, device=torch.device("cpu")):
     model.load_state_dict(torch.load(model_save_file))
     model.eval()
 
@@ -510,8 +476,7 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
     all_preds, all_targets = [], []
     with torch.no_grad():
         for batch_X, batch_y in test_loader:
-            if use_gpu:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             outputs = model(batch_X)
 
             if first_test_flag and plot_fig:
@@ -525,41 +490,19 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
     all_preds = np.concatenate(all_preds, axis=0)
     all_targets = np.concatenate(all_targets, axis=0)
 
-    print(all_targets.shape)
-    print(all_preds.shape)
-
     # Compute error metrics
     rmse = np.sqrt(mean_squared_error(all_targets, all_preds))
     mae = mean_absolute_error(all_targets, all_preds)
     r2 = r2_score(all_targets, all_preds)
 
-    # Compute MAPE (avoid division by zero)
-    non_zero_mask = all_targets != 0
-    mape = np.mean(np.abs((all_targets[non_zero_mask] - all_preds[non_zero_mask]) / all_targets[non_zero_mask])) * 100
-
-    # Compute Pearson Correlation Coefficient (PCC)
-    pcc = np.array([pearsonr(all_targets[:, i], all_preds[:, i])[0] for i in range(all_targets.shape[1])])
-
-    # Compute Mean Directional Accuracy (MDA)
-    direction_actual = np.sign(np.diff(all_targets))
-    direction_pred = np.sign(np.diff(all_preds))
-
-    mda = np.mean(direction_actual == direction_pred)
-
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
-    print(f"Test MAPE: {mape:.2f}%")
-    print(f"Test PCC: {pcc}")
-    print(f"Test MDA: {mda}")
 
     with open(output_save_file, "w") as f:
         f.write(f"Test RMSE: {rmse:.4f}\n")
         f.write(f"Test MAE: {mae:.4f}\n")
         f.write(f"Test R²: {r2:.4f}\n")
-        f.write(f"Test MAPE: {mape:.2f}%\n")
-        f.write(f"Test PCC: {pcc}\n")
-        f.write(f"Test MDA: {mda}\n")
 
     if plot_fig:
         plt.figure(figsize=(10, 5))
@@ -572,7 +515,3 @@ def evaluate_model(model, test_loader, model_save_file, output_save_file, plot_m
         plt.legend()
         plt.grid(True)
         plt.savefig(f'outputs/figures/{plot_model_name}_example.png')
-
-    if return_error_results:
-        return rmse, mae, r2, mape, pcc, mda
-    
