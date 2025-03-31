@@ -53,15 +53,15 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import os
-directory = "data/battery/csv"
+directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data"
 file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
 for f in file_list:
     print(f)
     
-SEQ_LEN = 100
-BATCH_SIZE = 32
-features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
-targets = ['available_capacity (Ah)']
+SEQ_LEN = 10
+BATCH_SIZE = 128
+features = ['voltage mean','voltage std','voltage kurtosis','voltage skewness','CC Q','CC charge time','voltage slope','voltage entropy','current mean','current std','current kurtosis','current skewness','CV Q','CV charge time','current slope','current entropy','capacity']
+targets = ['capacity']
 NUM_FEATURES = len(features)
 
 _, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,

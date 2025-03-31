@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from scipy.stats import pearsonr
 
-from utils import load_and_proc_data_xgb, monitor_idle_gpu_cpu
+from utils import load_and_proc_data_xgb, monitor_idle_gpu_cpu, evaluate_model
 
 # MONITORING =============================================================================================
 
@@ -56,15 +56,15 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import os
-directory = "data/battery/csv"
+directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data"
 file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
 for f in file_list:
     print(f)
     
-SEQ_LEN = 100
-BATCH_SIZE = 32
-features = ['pack_voltage (V)', 'charge_current (A)', 'max_temperature (℃)', 'min_temperature (℃)', 'soc', 'available_capacity (Ah)']
-targets = ['available_capacity (Ah)']
+SEQ_LEN = 10
+BATCH_SIZE = 128
+features = ['voltage mean','voltage std','voltage kurtosis','voltage skewness','CC Q','CC charge time','voltage slope','voltage entropy','current mean','current std','current kurtosis','current skewness','CV Q','CV charge time','current slope','current entropy','capacity']
+targets = ['capacity']
 NUM_FEATURES = len(features)
 
 X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(file_list,
@@ -113,43 +113,24 @@ def evaluate_model(model, X_test, y_test, plot_model_name, plot_fig = True):
 
     all_targets = y_test
     all_preds = predictions
-    
-    # Compute Pearson Correlation Coefficient (PCC)
-    pcc, _ = pearsonr(all_targets, all_preds)
+
+    # Compute MAPE (avoid division by zero)
+    non_zero_mask = all_targets != 0
+    mape = np.mean(np.abs((all_targets[non_zero_mask] - all_preds[non_zero_mask]) / all_targets[non_zero_mask])) * 100
 
     # Compute Mean Directional Accuracy (MDA)
-    direction_actual = np.sign(np.diff(all_targets))  # Actual trend (1 = up, -1 = down, 0 = no change)
-    direction_pred = np.sign(np.diff(all_preds))  # Predicted trend
+    direction_actual = np.sign(np.diff(all_targets))
+    direction_pred = np.sign(np.diff(all_preds))
 
-    mda = np.mean(direction_actual == direction_pred)  # Percentage of correctly predicted directions
+    mda = np.mean(direction_actual == direction_pred)
 
     print(f"\nTest RMSE: {rmse:.4f}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test R²: {r2:.4f}")
-    print(f"Test PCC: {pcc:.4f}")
-    print(f"Test MDA: {mda:.4f}")
+    print(f"Test MAPE: {mape:.2f}%")
+    print(f"Test MDA: {mda}")
 
-    with open('outputs/error_results_XGB.txt', "w") as f:
-        f.write(f"Test RMSE: {rmse:.4f}\n")
-        f.write(f"Test MAE: {mae:.4f}\n")
-        f.write(f"Test R²: {r2:.4f}\n")
-        f.write(f"Test PCC: {pcc:.4f}\n")
-        f.write(f"Test MDA: {mda:.4f}\n")
 
-    if plot_fig:
-
-        ind = np.random.randint(0, len(y_test) - 100)
-
-        plt.figure(figsize=(10, 5))
-        plt.plot(predictions[ind:ind+100], label="predicted", linestyle="dashed", alpha=0.7)
-        plt.plot(y_test[ind:ind+100], label="target", linestyle="solid", alpha=0.7)
-        
-        plt.ylabel("SOH (%)")
-        plt.xticks([])
-        plt.title(f'{plot_model_name} example')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(f'outputs/figures/{plot_model_name}_example.png')
         
 time.sleep(2)
 
