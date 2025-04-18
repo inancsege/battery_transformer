@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from utils import SOHCNN, load_and_proc_data, monitor_idle_gpu_cpu, train_model, evaluate_model
+from utils import SOHCNN, monitor_idle_gpu_cpu, train_model, evaluate_model
 
 # MONITORING =============================================================================================
 
@@ -50,25 +50,87 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
 # DATA PREPROC ===========================================================================================
 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from utils import SOHDataset, create_sequences # Assuming create_sequences and SOHDataset are still in utils
+from battery_transformer.preprocess.preprocess import DataPreprocessor # Import the new class
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import os
-directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data"
-file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
-for f in file_list:
-    print(f)
-    
+directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data" # Make sure this path is correct
+file_list = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".csv")]
+
+# --- New Preprocessing Steps ---
+# Initialize the preprocessor with desired settings (adjust as needed)
+# WARNING: Column names ('voltage', 'current', 'timestamp') must exist in the CSVs. 
+# Check CSV headers and adjust DataPreprocessor init or CSVs accordingly.
+# Also, ensure the original sampling rate is appropriate for window_size_hours.
+preprocessor = DataPreprocessor(
+    voltage_col='voltage mean', # Example: Adjust to actual voltage column name
+    current_col='current mean', # Example: Adjust to actual current column name
+    timestamp_col='timestamp',   # Example: Adjust to actual timestamp column name
+    window_size_hours=5, 
+    sampling_rate_hz=1/60, # Assuming data is sampled roughly every minute initially
+    downsample_freq='15T', 
+    filter_type='butterworth', # Or 'savgol' or None
+    remove_negatives=True,
+    normalize=True # Keep normalization True as it returns the scaler
+)
+
+all_processed_data = []
+final_scaler = None # To store the scaler from the last processed file (or handle scalers differently)
+
+for file_path in file_list:
+    try:
+        processed_df, scaler = preprocessor.process_file(file_path)
+        if not processed_df.empty:
+            all_processed_data.append(processed_df)
+            final_scaler = scaler # Overwrite scaler each time, assumes scaling is consistent
+    except Exception as e:
+        print(f"Skipping file {file_path} due to error: {e}")
+
+if not all_processed_data:
+     raise ValueError("No data could be processed. Check file paths, formats, and preprocessing parameters.")
+     
+# Combine all processed data
+combined_df = pd.concat(all_processed_data, ignore_index=True)
+
+# --- Adapt Feature Extraction and Sequencing ---
 SEQ_LEN = 10
 BATCH_SIZE = 128
-features = ['voltage mean','voltage std','voltage kurtosis','voltage skewness','CC Q','CC charge time','voltage slope','voltage entropy','current mean','current std','current kurtosis','current skewness','CV Q','CV charge time','current slope','current entropy','capacity']
-targets = ['capacity']
+# Define features based on the columns *after* preprocessing
+# Example: if preprocessing keeps voltage, current, and adds others, list them here.
+# The old feature list might be incompatible. Check columns in 'combined_df'.
+# Make sure 'capacity' or the target column name is correct.
+features = [col for col in combined_df.columns if col not in ['timestamp', 'capacity']] # Example: Exclude timestamp and target
+targets = ['capacity'] 
 NUM_FEATURES = len(features)
 
-_, _, train_loader, val_loader, test_loader, scaler_data = load_and_proc_data(file_list,
-                                                                              features = features,
-                                                                              targets=targets,
-                                                                              SEQ_LEN = SEQ_LEN,
-                                                                              BATCH_SIZE = BATCH_SIZE)
+if targets[0] not in combined_df.columns:
+    raise ValueError(f"Target column '{targets[0]}' not found in preprocessed data.")
+if not all(f in combined_df.columns for f in features):
+    raise ValueError(f"One or more feature columns not found in preprocessed data. Available: {combined_df.columns.tolist()}")
+    
+X_all = combined_df[features].values
+y_all = combined_df[targets[0]].values
+
+# Create sequences (ensure create_sequences function is compatible)
+X_seq, y_seq = create_sequences(X_all, y_all, SEQ_LEN)
+
+# Split data (e.g., 70/15/15 split)
+X_train_seq, X_temp_seq, y_train_seq, y_temp_seq = train_test_split(X_seq, y_seq, test_size=0.3, random_state=42)
+X_val_seq, X_test_seq, y_val_seq, y_test_seq = train_test_split(X_temp_seq, y_temp_seq, test_size=0.5, random_state=42) # 0.5 * 0.3 = 0.15
+
+# Create Datasets and DataLoaders (ensure SOHDataset is compatible)
+train_dataset = SOHDataset(X_train_seq, y_train_seq)
+val_dataset = SOHDataset(X_val_seq, y_val_seq)
+test_dataset = SOHDataset(X_test_seq, y_test_seq)
+
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True) # Shuffle training data
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # MODELS - TRAINING ======================================================================================
 

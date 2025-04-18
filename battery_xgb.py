@@ -1,11 +1,11 @@
-import torch
 import numpy as np
 import xgboost as xgb
-import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from scipy.stats import pearsonr
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from battery_transformer.preprocess.preprocess import DataPreprocessor
 
-from utils import load_and_proc_data_xgb, monitor_idle_gpu_cpu, evaluate_model
+from utils import monitor_idle_gpu_cpu
 
 # MONITORING =============================================================================================
 
@@ -53,22 +53,68 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
 
 # DATA PREPROC ===========================================================================================
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Removed torch import as device is not used directly here for XGBoost data
+# from utils import load_and_proc_data_xgb # Replaced by DataPreprocessor
 
 import os
-directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data"
-file_list = csv_files = [directory+'/'+f for f in os.listdir(directory) if f.endswith(".csv")]
-for f in file_list:
-    print(f)
-    
-SEQ_LEN = 10
-BATCH_SIZE = 128
-features = ['voltage mean','voltage std','voltage kurtosis','voltage skewness','CC Q','CC charge time','voltage slope','voltage entropy','current mean','current std','current kurtosis','current skewness','CV Q','CV charge time','current slope','current entropy','capacity']
-targets = ['capacity']
+directory = "C:/Users/serha/PycharmProjects/Temp/PINN4SOH/data/XJTU_data" # Verify path
+file_list = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".csv")]
+
+# --- New Preprocessing Steps ---
+preprocessor = DataPreprocessor(
+    voltage_col='voltage mean', # Adjust to actual voltage column name in CSVs
+    current_col='current mean', # Adjust to actual current column name in CSVs
+    timestamp_col='timestamp',   # Adjust to actual timestamp column name in CSVs
+    window_size_hours=5, 
+    sampling_rate_hz=1/60, # Adjust if initial sampling rate is different
+    downsample_freq='15T', 
+    filter_type='butterworth', # Or 'savgol' or None
+    remove_negatives=True,
+    normalize=True # Normalization needed as XGBoost benefits from scaled features
+)
+
+all_processed_data = []
+final_scaler = None # Store the scaler if needed for inverse transform later
+
+for file_path in file_list:
+    try:
+        processed_df, scaler = preprocessor.process_file(file_path)
+        if not processed_df.empty:
+            all_processed_data.append(processed_df)
+            final_scaler = scaler
+    except Exception as e:
+        print(f"Skipping file {file_path} due to error: {e}")
+
+if not all_processed_data:
+     raise ValueError("No data could be processed. Check file paths, formats, and preprocessing parameters.")
+     
+combined_df = pd.concat(all_processed_data, ignore_index=True)
+
+# --- Adapt Feature Extraction and Splitting for XGBoost ---
+# Note: XGBoost doesn't typically use sequence data like LSTMs/Transformers
+# It uses feature vectors directly. We will split the combined data.
+
+# Define features and target based on processed columns
+features = [col for col in combined_df.columns if col not in ['timestamp', 'capacity']] # Adjust target name if different
+target = 'capacity' 
 NUM_FEATURES = len(features)
 
-X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(file_list,
-                                                                                     features = features)
+if target not in combined_df.columns:
+    raise ValueError(f"Target column '{target}' not found in preprocessed data.")
+if not all(f in combined_df.columns for f in features):
+    raise ValueError(f"One or more feature columns not found in preprocessed data. Available: {combined_df.columns.tolist()}")
+
+X = combined_df[features].values
+y = combined_df[target].values
+
+# Split data (e.g., 70/15/15 split)
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.3, random_state=42)
+X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42) # 0.5 * 0.3 = 0.15
+
+# The old load_and_proc_data_xgb call is replaced
+# X_train, X_val, X_test, y_train, y_val, y_test, scaler_data = load_and_proc_data_xgb(...)
+
+# scaler_data is now final_scaler from the preprocessor
 
 # MODELS - TRAINING ======================================================================================
 
