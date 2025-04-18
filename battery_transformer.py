@@ -31,21 +31,65 @@ def monitor_gpu(log_file = 'gpu_usage_log.csv', interval = 1):
                 "CPU Usage (%)\n")
     
     while monitoring:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=" + query_str, "--format=csv,noheader,nounits"],
-            capture_output=True, text=True
-        )
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=" + query_str, "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, check=True
+            )
+            
+            raw_values = result.stdout.strip().split(", ")
+            if len(raw_values) < 2: 
+                print(f"Warning: Unexpected nvidia-smi output: {result.stdout.strip()}")
+                time.sleep(interval)
+                continue
 
-        gpu_data = list(map(float, result.stdout.strip().split(", ")[1:]))
-        gpu_data[0] = gpu_data[0] - avg_power
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        cpu_usage = psutil.cpu_percent() - avg_cpu_util
-        
-        log_entry = f"{timestamp}," + ",".join(list(map(str, gpu_data))) + f",{cpu_usage}\n"
-        
-        with open(log_file, "a") as f:
-            f.write(log_entry)
+            timestamp_str = raw_values[0]
+            gpu_data = []
+            for val_str in raw_values[1:]:
+                if '[N/A]' in val_str:
+                    gpu_data.append(0.0)
+                else:
+                    try:
+                        gpu_data.append(float(val_str))
+                    except ValueError:
+                        gpu_data.append(0.0)
+                        print(f"Warning: Replaced non-float value '{val_str}' with 0.0 in nvidia-smi output.")
 
+            if len(gpu_data) > 0:
+                if len(raw_values) > 1 and '[N/A]' not in raw_values[1]: 
+                     gpu_data[0] = gpu_data[0] - avg_power
+                else:
+                     if len(gpu_data) > 0:
+                           gpu_data[0] = 0.0 
+                     else:
+                           gpu_data.append(0.0)
+            else:
+                print("Warning: No GPU data processed after handling N/A values.")
+                continue
+
+            current_timestamp = time.strftime("%Y-%m-%d %H:%M:%S") 
+            cpu_usage = psutil.cpu_percent() - avg_cpu_util
+            
+            log_entry = f"{current_timestamp}," + ",".join(map(str, gpu_data)) + f",{cpu_usage}\n" 
+            
+            with open(log_file, "a") as f:
+                f.write(log_entry)
+                
+        except subprocess.CalledProcessError as e:
+            print(f"Error running nvidia-smi: {e}. Output: {e.output}")
+            time.sleep(interval * 5)
+        except FileNotFoundError:
+            print("Error: nvidia-smi command not found. Make sure NVIDIA drivers are installed and nvidia-smi is in the system PATH.")
+            monitoring = False
+            break 
+        except Exception as e:
+            print(f"An unexpected error occurred in monitor_gpu: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(interval)
+
+        if not monitoring:
+             break
         time.sleep(interval)
 
 # DATA PREPROC ===========================================================================================
