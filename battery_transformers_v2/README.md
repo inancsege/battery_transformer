@@ -183,12 +183,3 @@ The monitoring system:
 
 ---
 
-## 📄 License
-
-[MIT License or specify accordingly]
-
----
-
-## 🙌 Acknowledgements
-
-- [Optional: Acknowledge any public datasets, frameworks, or papers referenced.]
